@@ -78,6 +78,27 @@ export default function Decommissioned() {
     }
   }
 
+  async function remove(printer) {
+    const result = await confirm({
+      title: `Delete ${printer.name}?`,
+      message: 'Are you sure you want to delete the printer? This action is not recoverable.',
+      confirmLabel: 'Delete',
+      promptRequired: false,
+      danger: true,
+    });
+    if (!result) return;
+    try {
+      const res = await fetch(`/api/printers/${printer.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete');
+      showToast(`${printer.name} deleted`, 'success');
+      fetchPrinters();
+    } catch (err) {
+      showToast(`${err}`, 'error');
+    }
+    
+  }
+
   async function recommission(printer) {
     const result = await confirm({
       title: `Recommission ${printer.name}?`,
@@ -126,6 +147,7 @@ export default function Decommissioned() {
             onCancelEdit={cancelEdit}
             onChangeDraft={setDraftNote}
             onSave={saveNote}
+            onDelete={() => remove(printer)}
             onRecommission={() => recommission(printer)}
             onViewHistory={() => navigate(`/printers/${printer.id}`)}
           />
@@ -141,7 +163,7 @@ export default function Decommissioned() {
 function DecomCard({
   printer, isEditing, draftNote, saving,
   onBeginEdit, onCancelEdit, onChangeDraft, onSave,
-  onRecommission, onViewHistory,
+  onDelete, onRecommission, onViewHistory,
 }) {
   const note = printer.decommission_note || '';
   const textareaRef = useRef(null);
@@ -205,6 +227,13 @@ function DecomCard({
 
         {/* Icon-style action buttons */}
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          <button
+            onClick={onDelete}
+            title="Delete"
+            style={iconBtn('#cf3939', '#863838')}
+          >
+            🗙
+          </button>
           <button
             onClick={onRecommission}
             title="Recommission"
