@@ -83,10 +83,7 @@ class PrinterPoller extends EventEmitter {
       // own job lookup before holding, so this gate is not needed there.
       const SAFE_STATES = new Set(['IDLE', 'PRINTING', 'FINISHED', 'READY']);
       const missedFinished = newStatus === 'IDLE' && previousStatus === 'PRINTING';
-      const hasActiveJob = !!this.db.prepare(
-        "SELECT id FROM jobs WHERE printer_id = ? AND status IN ('uploading', 'printing') LIMIT 1"
-      ).get(printer.id);
-      const shouldHold = hasActiveJob && (newStatus === 'FINISHED' || missedFinished || !SAFE_STATES.has(newStatus));
+      const shouldHold = (newStatus === 'FINISHED' || missedFinished || !SAFE_STATES.has(newStatus));
       const holdUpdate = shouldHold ? ', is_held = 1' : '';
       // Clear job fields when leaving PRINTING state
       const clearJob = previousStatus === 'PRINTING' && newStatus !== 'PRINTING'
