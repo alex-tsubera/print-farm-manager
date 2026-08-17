@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom';
 import { useToast } from '../useToast';
 import EmptyState from '../components/EmptyState';
 import { useConfirm } from '../useConfirm';
+import JSZip from 'jszip';
+import fs from 'fs';
+import '../css/ExpandableImage.css'
 
 // ── Estimate helpers ──────────────────────────────────────────────────────────
 
@@ -431,6 +434,7 @@ function GcodeEstimateRow({ gc, onDelete, onSaved, filamentTypes, filamentColors
   });
   const [reqMaterial, setReqMaterial] = useState(gc.required_material || '');
   const [reqColor, setReqColor]       = useState(gc.required_color || '');
+  const [imageSrc, setImageSrc] = useState(null);
 
   useEffect(() => {
     setTimeDraft(formatDurationForInput(gc.est_print_secs));
@@ -438,7 +442,13 @@ function GcodeEstimateRow({ gc, onDelete, onSaved, filamentTypes, filamentColors
     setReqMaterial(gc.required_material || '');
     setReqColor(gc.required_color || '');
     try { setSelectedGroups(gc.allowed_groups ? JSON.parse(gc.allowed_groups) : []); } catch (_) { setSelectedGroups([]); }
-  }, [gc.est_print_secs, gc.material_grams, gc.required_material, gc.required_color, gc.allowed_groups]);
+
+    fetch(`/api/gcodes/thumbnail?path=${encodeURIComponent(gc.filepath)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) setImageSrc(data.image);
+      });
+  }, [gc.est_print_secs, gc.material_grams, gc.required_material, gc.required_color, gc.allowed_groups, gc.filepath]);
 
   function toggleGroup(g) {
     setSelectedGroups(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
@@ -489,133 +499,144 @@ function GcodeEstimateRow({ gc, onDelete, onSaved, filamentTypes, filamentColors
   }
 
   return (
-    <div style={{ background: '#0f172a', borderRadius: 4, padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{
-          fontFamily: 'monospace', fontSize: 12, color: '#e2e8f0',
-          flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {gc.filename}
-        </span>
-        <span style={{
-          background: '#1e3a5f', color: '#60a5fa', borderRadius: 3,
-          padding: '1px 6px', fontSize: 11, fontWeight: 700, flexShrink: 0,
-        }}>
-          {gc.printer_model}
-        </span>
-        <button
-          onClick={onDelete}
-          title="Delete G-code"
-          aria-label={`Delete G-code ${gc.filename}`}
-          style={{
-            background: 'none', border: 'none', color: '#ef4444',
-            cursor: 'pointer', padding: '4px 6px', fontSize: 16, lineHeight: 1, flexShrink: 0,
-          }}
-        >×</button>
-      </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{gc.parts_per_plate}x</span>
-        <span style={{ color: '#475569', fontSize: 11, flexShrink: 0 }}>per plate:</span>
-        <input
-          type="text"
-          placeholder="time e.g. 2h15m"
-          value={timeDraft}
-          onChange={e => setTimeDraft(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && save()}
-          style={{ ...inputSx, width: 110, fontSize: 12 }}
-        />
-        <input
-          type="text"
-          placeholder="material e.g. 45g"
-          value={materialDraft}
-          onChange={e => setMaterialDraft(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && save()}
-          style={{ ...inputSx, width: 110, fontSize: 12 }}
-        />
-        <button
-          onClick={parseFromFilename}
-          disabled={parsing}
-          title="Re-read print time and material weight from the filename (e.g. …_2h30m_45g.gcode)"
-          style={{
-            background: '#1f2937', color: '#94a3b8',
-            border: '1px solid #2d3748', borderRadius: 4,
-            padding: '5px 10px', fontSize: 12, cursor: parsing ? 'not-allowed' : 'pointer',
-            opacity: parsing ? 0.7 : 1, flexShrink: 0,
-          }}
-        >
-          {parsing ? 'Parsing…' : 'Parse filename'}
-        </button>
-        <button
-          onClick={save}
-          disabled={saving}
-          style={{
-            background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 4,
-            padding: '4px 10px', fontSize: 11, fontWeight: 600,
-            cursor: saving ? 'not-allowed' : 'pointer',
-            opacity: saving ? 0.7 : 1, flexShrink: 0,
-          }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-
-      {/* Targeting row */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span
-          title="Optional: restrict which printers can run this file. Material/color must match what an operator marked as loaded on the printer; groups restrict dispatch to those printer groups. Leave everything blank to allow any matching printer."
-          style={{ fontSize: 11, color: '#475569', flexShrink: 0, cursor: 'help', borderBottom: '1px dotted #334155' }}
-        >Targeting:</span>
-        {filamentTypes.length > 0 ? (
-          <select
-            value={reqMaterial}
-            onChange={e => { setReqMaterial(e.target.value); setReqColor(''); }}
-            style={{ ...inputSx, width: 160, fontSize: 12 }}
-          >
-            <option value="">{projectMaterial ? `— project: ${projectMaterial} —` : '— any material —'}</option>
-            {filamentTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
-          </select>
-        ) : (
-          <span style={{ fontSize: 11, color: '#334155', fontStyle: 'italic' }}>No materials in library</span>
+    <div style={{ background: '#0f172a', borderRadius: 4, padding: '6px 10px', display: 'flex', flexDirection: 'row', gap: 6 }}>
+      {imageSrc && (
+        <div className="img-hover-wrapper">
+          <img 
+            src={imageSrc} 
+            alt="3MF Thumbnail" 
+            className="hover-img"
+          />
+        </div>
         )}
-        {(() => {
-          const effectiveMat = reqMaterial || projectMaterial;
-          const colorOptions = filamentColors.filter(c => c.type_name === effectiveMat);
-          if (!effectiveMat || colorOptions.length === 0) return null;
-          return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            fontFamily: 'monospace', fontSize: 12, color: '#e2e8f0',
+            flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {gc.filename}
+          </span>
+          <span style={{
+            background: '#1e3a5f', color: '#60a5fa', borderRadius: 3,
+            padding: '1px 6px', fontSize: 11, fontWeight: 700, flexShrink: 0,
+          }}>
+            {gc.printer_model}
+          </span>
+          <button
+            onClick={onDelete}
+            title="Delete G-code"
+            aria-label={`Delete G-code ${gc.filename}`}
+            style={{
+              background: 'none', border: 'none', color: '#ef4444',
+              cursor: 'pointer', padding: '4px 6px', fontSize: 16, lineHeight: 1, flexShrink: 0,
+            }}
+          >×</button>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{gc.parts_per_plate}x</span>
+          <span style={{ color: '#475569', fontSize: 11, flexShrink: 0 }}>per plate:</span>
+          <input
+            type="text"
+            placeholder="time e.g. 2h15m"
+            value={timeDraft}
+            onChange={e => setTimeDraft(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && save()}
+            style={{ ...inputSx, width: 110, fontSize: 12 }}
+          />
+          <input
+            type="text"
+            placeholder="material e.g. 45g"
+            value={materialDraft}
+            onChange={e => setMaterialDraft(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && save()}
+            style={{ ...inputSx, width: 110, fontSize: 12 }}
+          />
+          <button
+            onClick={parseFromFilename}
+            disabled={parsing}
+            title="Re-read print time and material weight from the filename (e.g. …_2h30m_45g.gcode)"
+            style={{
+              background: '#1f2937', color: '#94a3b8',
+              border: '1px solid #2d3748', borderRadius: 4,
+              padding: '5px 10px', fontSize: 12, cursor: parsing ? 'not-allowed' : 'pointer',
+              opacity: parsing ? 0.7 : 1, flexShrink: 0,
+            }}
+          >
+            {parsing ? 'Parsing…' : 'Parse filename'}
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            style={{
+              background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 4,
+              padding: '4px 10px', fontSize: 11, fontWeight: 600,
+              cursor: saving ? 'not-allowed' : 'pointer',
+              opacity: saving ? 0.7 : 1, flexShrink: 0,
+            }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+
+        {/* Targeting row */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span
+            title="Optional: restrict which printers can run this file. Material/color must match what an operator marked as loaded on the printer; groups restrict dispatch to those printer groups. Leave everything blank to allow any matching printer."
+            style={{ fontSize: 11, color: '#475569', flexShrink: 0, cursor: 'help', borderBottom: '1px dotted #334155' }}
+          >Targeting:</span>
+          {filamentTypes.length > 0 ? (
             <select
-              value={reqColor}
-              onChange={e => setReqColor(e.target.value)}
+              value={reqMaterial}
+              onChange={e => { setReqMaterial(e.target.value); setReqColor(''); }}
               style={{ ...inputSx, width: 160, fontSize: 12 }}
             >
-              <option value="">{projectColor ? `— project: ${projectColor} —` : '— any color —'}</option>
-              {colorOptions.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              <option value="">{projectMaterial ? `— project: ${projectMaterial} —` : '— any material —'}</option>
+              {filamentTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
             </select>
-          );
-        })()}
-        {groups.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: '#475569' }}>Groups:</span>
-            {groups.map(g => (
-              <label key={g} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', fontSize: 12, color: selectedGroups.includes(g) ? '#7dd3fc' : '#64748b' }}>
-                <input
-                  type="checkbox"
-                  checked={selectedGroups.includes(g)}
-                  onChange={() => toggleGroup(g)}
-                  style={{ accentColor: '#3b82f6' }}
-                />
-                {g}
-              </label>
-            ))}
-            {selectedGroups.length === 0 && (
-              <span style={{ fontSize: 11, color: '#334155', fontStyle: 'italic' }}>
-                {projectGroups?.length > 0 ? `(inherits project: ${projectGroups.join(', ')})` : 'all groups'}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
+          ) : (
+            <span style={{ fontSize: 11, color: '#334155', fontStyle: 'italic' }}>No materials in library</span>
+          )}
+          {(() => {
+            const effectiveMat = reqMaterial || projectMaterial;
+            const colorOptions = filamentColors.filter(c => c.type_name === effectiveMat);
+            if (!effectiveMat || colorOptions.length === 0) return null;
+            return (
+              <select
+                value={reqColor}
+                onChange={e => setReqColor(e.target.value)}
+                style={{ ...inputSx, width: 160, fontSize: 12 }}
+              >
+                <option value="">{projectColor ? `— project: ${projectColor} —` : '— any color —'}</option>
+                {colorOptions.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            );
+          })()}
+          {groups.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: '#475569' }}>Groups:</span>
+              {groups.map(g => (
+                <label key={g} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', fontSize: 12, color: selectedGroups.includes(g) ? '#7dd3fc' : '#64748b' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedGroups.includes(g)}
+                    onChange={() => toggleGroup(g)}
+                    style={{ accentColor: '#3b82f6' }}
+                  />
+                  {g}
+                </label>
+              ))}
+              {selectedGroups.length === 0 && (
+                <span style={{ fontSize: 11, color: '#334155', fontStyle: 'italic' }}>
+                  {projectGroups?.length > 0 ? `(inherits project: ${projectGroups.join(', ')})` : 'all groups'}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
 
-      {error && <p style={{ color: '#f87171', fontSize: 11, margin: 0 }}>{error}</p>}
+        {error && <p style={{ color: '#f87171', fontSize: 11, margin: 0 }}>{error}</p>}
+      </div>
     </div>
   );
 }

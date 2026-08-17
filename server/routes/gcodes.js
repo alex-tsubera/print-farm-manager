@@ -3,6 +3,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const router = express.Router();
+const JSZip = require('jszip');
+const sharp = require('sharp');
 
 const GCODE_DIR = path.join(__dirname, '..', 'gcode');
 
@@ -90,6 +92,48 @@ function normalizeMaterialGrams(raw) {
   return null;
 }
 
+/**
+ * Extracts the thumbnail PNG from a .3mf file path and returns a Base64 Data URL.
+ * @param {string} filePath - Absolute or relative path to the .3mf file
+ * @returns {Promise<string>} Base64 Data URL (data:image/png;base64,...)
+ */
+async function get3mfThumbnail(filePath) {
+  // 1. Read the file buffer from disk
+  const buffer = await fs.promises.readFile(filePath);
+
+  // 2. Parse the 3MF archive
+  const zip = await JSZip.loadAsync(buffer);
+
+  // 3. Look for standard Bambu / Orca / Prusa thumbnail paths
+  let pngEntry =
+    zip.file('Metadata/plate_1.png') ||
+    zip.file('Metadata/thumbnail.png') ||
+    zip.file('Metadata/slice_1.png');
+
+  // Fallback: Find any PNG inside the Metadata/ folder
+  if (!pngEntry) {
+    pngEntry = Object.values(zip.files).find(
+      (entry) => entry.name.startsWith('Metadata/') && entry.name.endsWith('.png')
+    );
+  }
+
+  if (!pngEntry) {
+    throw new Error('No PNG thumbnail found in the .3mf archive.');
+  }
+
+  // 4. Extract as a Node.js Buffer instead of base64
+  const rawImageBuffer = await pngEntry.async('nodebuffer');
+
+  // 5. Auto-trim surrounding padding/transparent pixels using sharp
+  const croppedBuffer = await sharp(rawImageBuffer)
+    .trim() // Trims transparent or uniform background pixels
+    .toBuffer();
+
+  // 6. Convert the cropped buffer to a Base64 Data URL
+  const base64Data = croppedBuffer.toString('base64');
+  return `data:image/png;base64,${base64Data}`;
+}
+
 // scheduler is optional, only needed at runtime for sweepIdlePrinters after an upload
 // makes a part schedulable. Tests pass null so there is no live scheduler dependency.
 module.exports = (db, scheduler = null) => {
@@ -112,6 +156,17 @@ module.exports = (db, scheduler = null) => {
       return res.json({ parse_failed: true, material_grams });
     }
     res.json({ parse_failed: false, ...parsed, material_grams });
+  });
+
+  // POST /api/gcodes/thumbnail -- get 3mf thumbnail of a 3d model
+  router.get('/thumbnail', async (req, res) => {
+    try {
+      const filePath = './server/gcode/' + req.query.path;
+      const dataUrl = await get3mfThumbnail(filePath);
+      res.json({ success: true, image: dataUrl });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // POST /api/gcodes/upload — upload G-code file and create DB record
