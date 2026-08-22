@@ -49,7 +49,8 @@ const STATUS_MENU = {
               { label: 'Mark complete',   action: 'complete', danger: true }],
   paused:    [{ label: 'Resume project',  action: 'active' },
               { label: 'Mark complete',   action: 'complete', danger: true }],
-  completed: [{ label: 'Re-activate',     action: 'reactivate' }],
+  completed: [{ label: 'Re-activate',     action: 'reactivate' },
+              { label: 'Delete project',  action: 'delete', danger: true }],
 };
 
 function StatusDropdown({ project, onTransition }) {

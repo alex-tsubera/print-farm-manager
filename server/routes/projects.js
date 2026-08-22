@@ -95,8 +95,8 @@ module.exports = (db, scheduler = null) => {
   router.delete('/:id', (req, res) => {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    if (project.status !== 'draft') {
-      return res.status(400).json({ error: 'Only draft projects can be deleted.' });
+    if (project.status !== 'draft' && project.status !== 'completed') {
+      return res.status(400).json({ error: 'Only draft and completed projects can be deleted.' });
     }
 
     const parts = db.prepare('SELECT id FROM parts WHERE project_id = ?').all(project.id);
